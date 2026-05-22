@@ -1,0 +1,28 @@
+---
+- name: Configure MikroTik syslog
+  hosts: routers
+  gather_facts: no
+  strategy: free
+  ignore_unreachable: true
+  serial: 4
+
+  connection: network_cli
+
+  vars:
+    ansible_network_os: community.routeros.routeros
+    ansible_network_cli_ssh_type: libssh
+    ansible_command_timeout: 60
+
+  tasks:
+
+    - name: Configure remote syslog
+      community.routeros.command:
+        commands:
+          - >
+            /system logging remove [find action=remotesyslog];
+            /system logging action remove [find name=remotesyslog];
+            /system logging action add name=remotesyslog target=remote remote= #YOUR_SYSLOG_HOST_IP remote-port=514 src-address={{ ansible_host }} bsd-syslog=yes syslog-facility=daemon;
+            /system logging add topics=account action=remotesyslog;
+            /system logging add topics=critical action=remotesyslog;
+            /system logging add topics=error action=remotesyslog;
+            /system logging add topics=system action=remotesyslog;
