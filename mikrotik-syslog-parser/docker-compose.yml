@@ -1,0 +1,16 @@
+services:
+
+  rsyslog:
+    image: rsyslog/rsyslog
+    container_name: mikrotik_syslog
+    entrypoint: ["rsyslogd","-n"]
+    ports:
+      - "514:514/udp"
+    volumes:
+      - ./logs:/logs
+      - ./rsyslog.conf:/etc/rsyslog.conf
+
+  parser:
+    build: ./parser
+    container_name: mikrotik_parser
+    restart: always
