@@ -1,3 +1,2 @@
 # work
-# test message
-Here are the scripts I have used at least once.
+Here will be scripts, templates, and other tools that I periodically use in my work.
