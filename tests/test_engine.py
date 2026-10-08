@@ -113,6 +113,50 @@ class SessionTest(unittest.TestCase):
         self.assertEqual([e.event_type for e in out], [RDP_LOGIN, RDP_DISCONNECT, RDP_RECONNECT])
         self.assertEqual(out[1].client_name, "PC-01")
 
+    def test_reconnect_via_temporary_logon(self):
+        # Переподключение к отключённой сессии 0x80c через временный
+        # вход 0x813 (4624/10), который закрывается через секунду.
+        out = run(self.engine,
+                  nla_logon(time="2026-10-08 19:10:35"),
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  session_event(4778, "0x80c", time="2026-10-08 19:10:38"),
+                  event(4634, LogonType="10", TargetLogonId="0x813", time="2026-10-08 19:10:38", **USER))
+
+        self.assertEqual([(e.event_type, e.logon_id) for e in out], [(RDP_RECONNECT, "0x80c")])
+        self.assertEqual(out[0].client_name, "PC-01")
+        self.assertIsNone(self.engine.sessions.find("ts1.example.local", "0x813"))
+
+    def test_reconnect_4_seconds_after_temporary_logon(self):
+        out = run(self.engine,
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  session_event(4778, "0x80c", time="2026-10-08 19:10:41"))
+
+        self.assertEqual([e.event_type for e in out], [RDP_RECONNECT])
+
+    def test_login_followed_by_late_reconnect_is_kept(self):
+        out = run(self.engine,
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  session_event(4778, "0x80c", time="2026-10-08 19:10:50"))
+
+        self.assertEqual([e.event_type for e in out], [RDP_LOGIN, RDP_RECONNECT])
+
+    def test_reconnect_of_other_user_keeps_login(self):
+        out = run(self.engine,
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  {**session_event(4778, "0x80c", time="2026-10-08 19:10:38"), "AccountName": "user02"})
+
+        self.assertEqual([e.event_type for e in out], [RDP_RECONNECT, RDP_LOGIN])
+
+    def test_login_is_held_until_tick(self):
+        # Живой режим: LOGIN уходит только после LOGIN_HOLD секунд
+        from helpers import normalize_event
+        from engine import LOGIN_HOLD
+
+        self.assertEqual(self.engine.process(normalize_event(rdp_logon("0x813")), now=100.0), [])
+        self.assertEqual(self.engine.tick(100.0 + LOGIN_HOLD - 1), [])
+        self.assertEqual([e.event_type for e in self.engine.tick(100.0 + LOGIN_HOLD)], [RDP_LOGIN])
+        self.assertEqual(self.engine.tick(1000.0), [])
+
     def test_console_session_events_are_ignored(self):
         out = run(self.engine,
                   session_event(4778, "0x600", session="Console", address="LOCAL"),

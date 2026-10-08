@@ -46,18 +46,29 @@ def make_engine(router=None, sessions=None):
     )
 
 
-def run(engine, *events):
+def run(engine, *events, flush=True):
     """
     Прогоняет сырые события (dict) через engine, возвращает RDPEvent'ы.
+    Часы - время события (как в replay.py); в конце удерживаемые
+    RDP_LOGIN отдаются через flush().
     """
 
     results = []
+    now = 0.0
 
     for event in events:
         normalized = normalize_event(dict(event))
 
-        if normalized is not None:
-            results.extend(engine.process(normalized))
+        if normalized is None:
+            continue
+
+        if normalized.event_time:
+            now = max(now, normalized.event_time.timestamp())
+
+        results.extend(engine.process(normalized, now))
+
+    if flush:
+        results.extend(engine.flush())
 
     return results
 

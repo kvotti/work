@@ -29,14 +29,13 @@ def iter_files(paths):
             yield path
 
 
-def iter_events(paths):
-    for path in iter_files(paths):
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                event = parse_line(line)
+def iter_events(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            event = parse_line(line)
 
-                if event:
-                    yield event
+            if event:
+                yield event
 
 
 def main():
@@ -60,13 +59,25 @@ def main():
         host_info=router.host_info,
     )
 
-    for event in iter_events(opts.paths):
-        normalized = normalize_event(event)
+    # Часы replay - время события, а не реальное время. Каждый файл
+    # rsyslog - один хост за сутки, поэтому часы сбрасываются, а
+    # удерживаемые RDP_LOGIN отдаются в конце каждого файла.
+    for path in iter_files(opts.paths):
+        now = 0.0
 
-        if normalized is None:
-            continue
+        for event in iter_events(path):
+            normalized = normalize_event(event)
 
-        for rdp_event in engine.process(normalized):
+            if normalized is None:
+                continue
+
+            if normalized.event_time:
+                now = max(now, normalized.event_time.timestamp())
+
+            for rdp_event in engine.process(normalized, now):
+                print_event(rdp_event, router, opts.json)
+
+        for rdp_event in engine.flush():
             print_event(rdp_event, router, opts.json)
 
 

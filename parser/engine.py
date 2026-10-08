@@ -1,3 +1,4 @@
+import time
 from collections import deque
 from datetime import timedelta
 
@@ -19,6 +20,16 @@ NLA_LOOKBACK = timedelta(seconds=30)
 NLA_LOOKAHEAD = timedelta(seconds=2)    # точность EventTime - 1 с
 CONTEXT_TTL = timedelta(seconds=60)
 CONTEXT_SWEEP_EVERY = 1000
+
+# Переподключение к отключённой сессии бывает в двух видах:
+#   4778 + 4624/7                       - LOGIN не возникает;
+#   4624/10 (временный вход) + 4778     - через ~1 с, временный вход
+#                                         закрывается 4634/10.
+# Поэтому RDP_LOGIN удерживается LOGIN_HOLD секунд: если за это время
+# пришёл 4778 того же пользователя на том же сервере - это RECONNECT.
+# Терминальный сервер, сутки: 25 из 51 4624/10 - временные, 4778 через
+# 0-4 с (максимум 4 с); остальные 26 - настоящие, 4778 за ними нет.
+LOGIN_HOLD = 10.0
 
 
 # ------------------------------------------------------------
@@ -95,8 +106,48 @@ class CorrelationEngine:
         self.sessions = sessions or SessionStore()
         self.host_info = host_info or (lambda host: None)
         self.nla = NlaContext()
+        self.pending = []    # удерживаемые RDP_LOGIN (см. LOGIN_HOLD)
 
-    def process(self, ev: NormalizedEvent) -> list[RDPEvent]:
+    def process(self, ev: NormalizedEvent, now=None) -> list[RDPEvent]:
+        """
+        now - текущее время в секундах (по умолчанию time.monotonic()).
+        Сначала отдаёт удерживаемые LOGIN с истёкшим сроком, затем
+        результат обработки события.
+        """
+
+        if now is None:
+            now = time.monotonic()
+
+        results = self.tick(now)
+        results.extend(self.handle(ev, now))
+
+        return results
+
+    def tick(self, now=None) -> list[RDPEvent]:
+        """
+        Отдаёт удерживаемые RDP_LOGIN, срок которых истёк.
+        Вызывать периодически, даже если новых событий нет.
+        """
+
+        if now is None:
+            now = time.monotonic()
+
+        due = [p for p in self.pending if p["deadline"] <= now]
+        self.pending = [p for p in self.pending if p["deadline"] > now]
+
+        return [p["event"] for p in due]
+
+    def flush(self) -> list[RDPEvent]:
+        """
+        Отдаёт все удерживаемые события (конец replay, остановка).
+        """
+
+        results = [p["event"] for p in self.pending]
+        self.pending = []
+
+        return results
+
+    def handle(self, ev: NormalizedEvent, now) -> list[RDPEvent]:
 
         if ev.event_id == 4624:
 
@@ -107,7 +158,7 @@ class CorrelationEngine:
                 return []
 
             if ev.logon_type == "10":
-                return self.on_rdp_logon(ev)
+                return self.on_rdp_logon(ev, now)
 
             return []
 
@@ -129,7 +180,7 @@ class CorrelationEngine:
     # 4624/10: новый RDP login
     # --------------------------------------------------------
 
-    def on_rdp_logon(self, ev):
+    def on_rdp_logon(self, ev, now):
 
         # Второе событие linked-пары (UAC split token):
         # его LogonId уже зарегистрирован первым событием.
@@ -165,17 +216,47 @@ class CorrelationEngine:
         if nla:
             evidence.insert(0, "4624/3")
 
-        return [RDPEvent(
-            event_type=RDP_LOGIN,
-            target_host=ev.host,
-            username=ev.user,
-            event_time=ev.event_time_raw,
-            source_ip=ev.ip,
-            logon_id=session_id,
-            client_workstation=client,
-            auth_package=nla.auth_package if nla else ev.auth_package,
-            evidence=evidence,
-        )]
+        self.pending.append({
+            "key": (ev.host_key, ev.user_key),
+            "session_id": session_id,
+            "deadline": now + LOGIN_HOLD,
+            "event": RDPEvent(
+                event_type=RDP_LOGIN,
+                target_host=ev.host,
+                username=ev.user,
+                event_time=ev.event_time_raw,
+                source_ip=ev.ip,
+                logon_id=session_id,
+                client_workstation=client,
+                auth_package=nla.auth_package if nla else ev.auth_package,
+                evidence=evidence,
+            ),
+        })
+
+        return []
+
+    def take_pending_login(self, ev):
+        """
+        Забирает удерживаемый LOGIN того же пользователя на том же
+        сервере: это был временный вход перед переподключением.
+        Его сессия не настоящая и удаляется из списка.
+        """
+
+        key = (ev.host_key, ev.user_key)
+        taken = [p for p in self.pending if p["key"] == key]
+
+        if not taken:
+            return None
+
+        self.pending = [p for p in self.pending if p["key"] != key]
+
+        for p in taken:
+            session = self.sessions.find(ev.host_key, p["session_id"])
+
+            if session and p["session_id"] != ev.logon_id:
+                self.sessions.remove(session)
+
+        return taken[-1]["event"]
 
     # --------------------------------------------------------
     # 4778 / 4779: reconnect / disconnect
@@ -188,6 +269,7 @@ class CorrelationEngine:
 
         reconnect = ev.event_id == 4778
         session_id = ev.logon_id
+        login = self.take_pending_login(ev) if reconnect else None
 
         if ev.logon_id:
             session = self.sessions.find(ev.host_key, ev.logon_id)
@@ -215,8 +297,9 @@ class CorrelationEngine:
             source_ip=ev.ip,
             logon_id=ev.logon_id,
             client_name=ev.client_name,
+            client_workstation=login.client_workstation if login else None,
             session_name=ev.session_name,
-            evidence=[str(ev.event_id)],
+            evidence=(["4624/10"] if login else []) + [str(ev.event_id)],
         )]
 
     # --------------------------------------------------------

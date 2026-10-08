@@ -2,6 +2,7 @@ import json
 import os
 import re
 import socket
+import time
 import urllib.parse
 import urllib.request
 
@@ -14,6 +15,9 @@ from state import SessionStore
 
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 1516
+
+# Как часто проверять удерживаемые RDP_LOGIN, когда событий нет
+TICK_INTERVAL = 1.0
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -110,7 +114,16 @@ def process_event(event):
     if normalized is None:
         return
 
-    for rdp_event in engine.process(normalized):
+    deliver(engine.process(normalized, time.monotonic()))
+
+
+def process_tick():
+    deliver(engine.tick(time.monotonic()))
+
+
+def deliver(rdp_events):
+
+    for rdp_event in rdp_events:
 
         text = format_rdp_event(rdp_event)
 
@@ -132,12 +145,17 @@ def process_event(event):
 def handle_connection(conn, addr):
 
     buffer = b""
+    conn.settimeout(TICK_INTERVAL)
 
     try:
 
         while True:
 
-            data = conn.recv(65535)
+            try:
+                data = conn.recv(65535)
+            except socket.timeout:
+                process_tick()
+                continue
 
             if not data:
                 break
@@ -198,6 +216,7 @@ def main():
     )
 
     server.listen(10)
+    server.settimeout(TICK_INTERVAL)
 
     print(
         f"[*] Listening on "
@@ -206,7 +225,11 @@ def main():
 
     while True:
 
-        conn, addr = server.accept()
+        try:
+            conn, addr = server.accept()
+        except socket.timeout:
+            process_tick()
+            continue
 
         handle_connection(
             conn,
