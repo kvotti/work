@@ -24,6 +24,8 @@ services:
       RDP_SERVERS_PATH: /config/rdp_servers.json
       UNKNOWN_HOST_MODE: ${UNKNOWN_HOST_MODE:-default}
       TELEGRAM_FAILED_MENTION: ${TELEGRAM_FAILED_MENTION}
+      TELEGRAM_MIN_INTERVAL: ${TELEGRAM_MIN_INTERVAL:-3}
+      TELEGRAM_QUEUE_SIZE: ${TELEGRAM_QUEUE_SIZE:-500}
       SESSIONS_PATH: /state/sessions.json
     volumes:
       - ./config:/config:ro

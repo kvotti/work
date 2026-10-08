@@ -270,5 +270,64 @@ class FailureTest(unittest.TestCase):
         self.assertSilent(failure(logon_type="2"))
 
 
+
+class FailureAggregationTest(unittest.TestCase):
+
+    def setUp(self):
+        self.engine = helpers.make_engine()
+
+    def attempt(self, time, user="user01", ip="192.0.2.10", host="TS1.example.local"):
+        return failure(time=time, ip=ip, host=host, TargetUserName=user)
+
+    def test_first_failure_is_immediate(self):
+        out = run(self.engine, self.attempt("2026-10-08 10:00:00"), flush=False)
+
+        self.assertEqual([e.failure_count for e in out], [1])
+
+    def test_brute_force_is_summarized(self):
+        attempts = [self.attempt(f"2026-10-08 10:00:{s:02d}", user=f"user{s:02d}") for s in range(0, 50, 5)]
+        out = run(self.engine, *attempts)
+
+        self.assertEqual([e.failure_count for e in out], [1, 9])
+        summary = out[1]
+        self.assertEqual(summary.first_event_time, "2026-10-08 10:00:05")
+        self.assertEqual(summary.event_time, "2026-10-08 10:00:45")
+        self.assertEqual(len(summary.usernames), 9)
+        self.assertIn("aggregated", summary.evidence)
+
+    def test_summary_sent_when_window_expires(self):
+        run(self.engine, self.attempt("2026-10-08 10:00:00"), self.attempt("2026-10-08 10:00:10"),
+            self.attempt("2026-10-08 10:00:20"), flush=False)
+        out = self.engine.tick(helpers.normalize_event(self.attempt("2026-10-08 10:01:00")).event_time.timestamp())
+
+        self.assertEqual([(e.failure_count, e.usernames) for e in out], [(2, ["EXAMPLE\\user01"])])
+
+    def test_continuous_attack_gives_summary_per_minute(self):
+        attempts = [self.attempt(f"2026-10-08 10:{m:02d}:{s:02d}") for m in range(3) for s in range(0, 60, 10)]
+        out = run(self.engine, *attempts)
+
+        self.assertEqual(sum(e.failure_count for e in out), len(attempts))
+        self.assertLessEqual(len(out), 4)
+
+    def test_single_retry_is_not_a_summary(self):
+        out = run(self.engine, self.attempt("2026-10-08 10:00:00"), self.attempt("2026-10-08 10:00:09"))
+
+        self.assertEqual([e.failure_count for e in out], [1, 1])
+
+    def test_different_sources_are_separate(self):
+        out = run(self.engine,
+                  self.attempt("2026-10-08 10:00:00", ip="192.0.2.10"),
+                  self.attempt("2026-10-08 10:00:01", ip="192.0.2.11"),
+                  self.attempt("2026-10-08 10:00:02", ip="192.0.2.10", host="DC1.example.local"),
+                  flush=False)
+
+        self.assertEqual(len(out), 3)
+
+    def test_new_window_after_quiet_period(self):
+        out = run(self.engine, self.attempt("2026-10-08 10:00:00"), self.attempt("2026-10-08 10:05:00"))
+
+        self.assertEqual([e.failure_count for e in out], [1, 1])
+        self.assertEqual(out[1].event_time, "2026-10-08 10:05:00")
+
 if __name__ == "__main__":
     unittest.main()

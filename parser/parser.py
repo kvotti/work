@@ -3,14 +3,13 @@ import os
 import re
 import socket
 import time
-import urllib.parse
-import urllib.request
 
 from engine import CorrelationEngine
 from formatter import format_rdp_event
 from normalize import normalize_event
 from router import router_from_env
 from state import SessionStore
+from telegram_client import TelegramSender
 
 
 LISTEN_HOST = "0.0.0.0"
@@ -18,57 +17,6 @@ LISTEN_PORT = 1516
 
 # Как часто проверять удерживаемые RDP_LOGIN, когда событий нет
 TICK_INTERVAL = 1.0
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TELEGRAM_PROXY = os.getenv("TELEGRAM_PROXY")
-
-if TELEGRAM_PROXY:
-    proxy_handler = urllib.request.ProxyHandler({
-        "http": TELEGRAM_PROXY,
-        "https": TELEGRAM_PROXY,
-    })
-    telegram_opener = urllib.request.build_opener(proxy_handler)
-else:
-    telegram_opener = urllib.request.build_opener()
-
-
-def send_telegram(text, thread_id=None):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[!] Telegram не настроен: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID")
-        return False
-
-    url = (
-        f"https://api.telegram.org/bot"
-        f"{TELEGRAM_BOT_TOKEN}/sendMessage"
-    )
-
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
-
-    if thread_id:
-        data["message_thread_id"] = int(thread_id)
-
-    encoded = urllib.parse.urlencode(data).encode()
-
-    try:
-        request = urllib.request.Request(url, data=encoded)
-
-        with telegram_opener.open(request, timeout=10) as response:
-            result_json = json.loads(response.read().decode())
-
-        if not result_json.get("ok"):
-            print(f"[!] Telegram error: {result_json}")
-            return False
-
-        return True
-
-    except Exception as e:
-        print(f"[!] Telegram connection error: {e}")
-        return False
 
 
 # ------------------------------------------------------------
@@ -105,6 +53,7 @@ def parse_line(raw):
 
 router = None
 engine = None
+sender = None
 
 
 def process_event(event):
@@ -135,7 +84,7 @@ def deliver(rdp_events):
         if route is None:
             continue
 
-        send_telegram(text, route.thread_id)
+        sender.submit(text, route.thread_id)
 
 
 # ------------------------------------------------------------
@@ -193,8 +142,10 @@ def handle_connection(conn, addr):
 
 def main():
 
-    global router, engine
+    global router, engine, sender
     router = router_from_env()
+    sender = TelegramSender(notice_thread_id=router.default_thread_id)
+    sender.start()
     engine = CorrelationEngine(
         sessions=SessionStore(os.getenv("SESSIONS_PATH", "/state/sessions.json")),
         host_info=router.host_info,

@@ -42,10 +42,22 @@ def format_rdp_event(event: RDPEvent) -> str | None:
 
     if event.event_type == RDP_FAILED:
 
-        text = (
-            "🔴 RDP LOGIN FAILED\n\n"
-            f"🖥 Host: {event.target_host}\n"
-            f"👤 User: {event.username}\n"
+        repeated = event.failure_count > 1
+
+        if repeated:
+            text = (
+                f"🔴 RDP LOGIN FAILED ×{event.failure_count}\n\n"
+                f"🖥 Host: {event.target_host}\n"
+                f"👤 Users: {users_text(event.usernames)}\n"
+            )
+        else:
+            text = (
+                "🔴 RDP LOGIN FAILED\n\n"
+                f"🖥 Host: {event.target_host}\n"
+                f"👤 User: {event.username}\n"
+            )
+
+        text += (
             f"🌐 Source: {event.source_ip or 'Unknown'}\n"
             f"{client_line(event)}"
         )
@@ -56,7 +68,10 @@ def format_rdp_event(event: RDPEvent) -> str | None:
         if event.substatus:
             text += f"❗ Substatus: {event.substatus}\n"
 
-        text += f"🕐 Time: {event.event_time}"
+        if repeated:
+            text += f"🕐 Time: {event.first_event_time} – {event.event_time}"
+        else:
+            text += f"🕐 Time: {event.event_time}"
 
         if FAILED_MENTION:
             text += f"\n{FAILED_MENTION}"
@@ -129,6 +144,15 @@ def client_line(event: RDPEvent) -> str:
     client = event.client_name or event.client_workstation
 
     return f"💻 Client: {client}\n" if client else ""
+
+
+def users_text(usernames, limit=5):
+    shown = ", ".join(usernames[:limit])
+
+    if len(usernames) > limit:
+        shown += f" и ещё {len(usernames) - limit}"
+
+    return shown
 
 
 def probable_line(event: RDPEvent) -> str:

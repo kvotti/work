@@ -8,6 +8,7 @@
   "client": "PC-03",
   "logon_id": "0x62a293f8",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -19,6 +20,7 @@
   "client": "PC-03",
   "logon_id": "0x62a293f8",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -30,17 +32,7 @@
   "client": "PC-07",
   "logon_id": null,
   "confidence": "confirmed",
-  "thread_id": 111
- },
- {
-  "event_time": "2026-10-02 08:21:11",
-  "event_type": "RDP_FAILED",
-  "target_host": "TS1.example.local",
-  "username": "EXAMPLE\\user07",
-  "source_ip": "192.0.2.10",
-  "client": "PC-07",
-  "logon_id": null,
-  "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -52,6 +44,7 @@
   "client": "PC-08",
   "logon_id": "0x7c012ceea",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -63,6 +56,19 @@
   "client": "PC-07",
   "logon_id": "0x7c0171c6c",
   "confidence": "confirmed",
+  "failure_count": 1,
+  "thread_id": 111
+ },
+ {
+  "event_time": "2026-10-02 08:21:11",
+  "event_type": "RDP_FAILED",
+  "target_host": "TS1.example.local",
+  "username": "EXAMPLE\\user07",
+  "source_ip": "192.0.2.10",
+  "client": "PC-07",
+  "logon_id": null,
+  "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -74,6 +80,7 @@
   "client": "PC-09",
   "logon_id": "0x7c04d0970",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -85,6 +92,7 @@
   "client": "PC-07",
   "logon_id": "0x7c0171c6c",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -96,6 +104,7 @@
   "client": null,
   "logon_id": "0x7c09bc27d",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -107,6 +116,7 @@
   "client": "PC-09",
   "logon_id": "0x7c04d0970",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -118,6 +128,7 @@
   "client": "PC-09",
   "logon_id": "0x7c04d0970",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -129,6 +140,7 @@
   "client": "PC-11",
   "logon_id": "0x7c09bc27d",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -140,6 +152,7 @@
   "client": "PC-07",
   "logon_id": "0x7c0171c6c",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -151,6 +164,7 @@
   "client": "PC-08",
   "logon_id": "0x7c012ceea",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -162,6 +176,7 @@
   "client": "PC-12",
   "logon_id": "0x130e4683",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -173,6 +188,7 @@
   "client": "PC-12",
   "logon_id": "0x130e4683",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -184,6 +200,7 @@
   "client": "PC-03",
   "logon_id": "0x62a293f8",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -195,6 +212,7 @@
   "client": "PC-14",
   "logon_id": "0x62a293f8",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -206,6 +224,7 @@
   "client": "PC-14",
   "logon_id": "0x62a293f8",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -217,6 +236,7 @@
   "client": null,
   "logon_id": "0x7965ce76",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -228,6 +248,7 @@
   "client": "PC-11",
   "logon_id": "0x7c09bc27d",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -239,6 +260,7 @@
   "client": "PC-09",
   "logon_id": "0x7c04d0970",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -250,6 +272,7 @@
   "client": null,
   "logon_id": "0x7c0692148",
   "confidence": "probable",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -261,6 +284,7 @@
   "client": null,
   "logon_id": "0x7c78399e6",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -272,6 +296,7 @@
   "client": null,
   "logon_id": "0x7df7a89de",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 111
  },
  {
@@ -283,6 +308,7 @@
   "client": null,
   "logon_id": "0x82f4094a",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -294,6 +320,7 @@
   "client": "PC-03",
   "logon_id": "0x82f4094a",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -305,6 +332,7 @@
   "client": "PC-03",
   "logon_id": "0x82f4094a",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -316,6 +344,7 @@
   "client": "PC-03",
   "logon_id": "0x82f4094a",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -327,39 +356,19 @@
   "client": "PC-03",
   "logon_id": null,
   "confidence": "confirmed",
-  "thread_id": 222
- },
- {
-  "event_time": "2026-10-08 17:13:46",
-  "event_type": "RDP_FAILED",
-  "target_host": "APP1.example.local",
-  "username": "local\\user03",
-  "source_ip": "192.0.2.6",
-  "client": "PC-03",
-  "logon_id": null,
-  "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
   "event_time": "2026-10-08 17:14:06",
   "event_type": "RDP_FAILED",
   "target_host": "APP1.example.local",
-  "username": "user03@example.local",
+  "username": "учётных записей: 2",
   "source_ip": "192.0.2.6",
   "client": "PC-03",
   "logon_id": null,
   "confidence": "confirmed",
-  "thread_id": 222
- },
- {
-  "event_time": "2026-10-08 17:14:26",
-  "event_type": "RDP_FAILED",
-  "target_host": "APP1.example.local",
-  "username": "EXAMPLE\\user03",
-  "source_ip": "192.0.2.6",
-  "client": "PC-03",
-  "logon_id": null,
-  "confidence": "confirmed",
+  "failure_count": 2,
   "thread_id": 222
  },
  {
@@ -371,6 +380,19 @@
   "client": null,
   "logon_id": "0x82fdaa0a",
   "confidence": "confirmed",
+  "failure_count": 1,
+  "thread_id": 222
+ },
+ {
+  "event_time": "2026-10-08 17:14:26",
+  "event_type": "RDP_FAILED",
+  "target_host": "APP1.example.local",
+  "username": "EXAMPLE\\user03",
+  "source_ip": "192.0.2.6",
+  "client": "PC-03",
+  "logon_id": null,
+  "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  },
  {
@@ -382,6 +404,7 @@
   "client": "PC-03",
   "logon_id": "0x82fdaa0a",
   "confidence": "confirmed",
+  "failure_count": 1,
   "thread_id": 222
  }
 ]

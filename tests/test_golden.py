@@ -31,6 +31,7 @@ def actual_events():
             "client": e.client_name or e.client_workstation,
             "logon_id": e.logon_id,
             "confidence": e.confidence,
+            "failure_count": e.failure_count,
             "thread_id": router.route(e).thread_id,
         }
         for e in events
