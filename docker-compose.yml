@@ -3,12 +3,14 @@ services:
   rsyslog:
     image: rsyslog/rsyslog
     container_name: winlog_syslog
+    restart: always
     entrypoint: ["rsyslogd","-n"]
     ports:
       - "1515:1515/tcp"
     volumes:
       - ./logs:/logs
       - ./rsyslog.conf:/etc/rsyslog.conf
+      - ./spool:/var/spool/rsyslog
 
   parser:
     build: ./parser

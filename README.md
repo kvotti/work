@@ -64,7 +64,7 @@ docker logs -f winlog_parser
 [*] Listening on 0.0.0.0:1516
 ```
 
-Обновление: `git pull && docker compose up -d --build parser`, из каталога проекта.
+Обновление: `git pull && docker compose up -d --build parser`, из каталога проекта. Пересобирать нужно именно образ: код копируется в него при сборке, и `docker compose restart` оставит старую версию. rsyslog при этом продолжает принимать события, а пересылку парсеру держит в очереди и досылает после перезапуска.
 
 `.env`, `config/rdp_servers.json`, `logs/` и `state/` находятся в `.gitignore` и при `git pull` не затрагиваются. При переезде со старой установки скопируйте их в каталог проекта до первого запуска.
 После правки только `config/rdp_servers.json` достаточно `docker compose restart parser`.
@@ -149,6 +149,7 @@ rsyslog ([rsyslog.conf](rsyslog.conf)) пишет сырые логи в `logs/r
 | `.env` | секреты | нет |
 | `logs/` | сырые события (имена пользователей, IP) | нет |
 | `state/sessions.json` | известные RDP-сессии; переживает рестарт контейнера | нет |
+| `spool/` | очередь rsyslog для парсера, пока тот недоступен (до 1 ГБ) | нет |
 | `config/rdp_servers.json` | серверы и темы (имена инфраструктуры) | нет; в git только `rdp_servers.example.json` |
 
 Удаление `state/sessions.json` безопасно. Последствие: выход из сессий, открытых до этого, на `admin`-серверах не придёт, а на `user`-серверах придёт с пометкой «не подтверждено».
