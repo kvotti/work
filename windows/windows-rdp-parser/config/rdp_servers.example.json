@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "Пример. Скопируйте в config/rdp_servers.json (он в .gitignore) и заполните.",
+    "topics: thread_id темы Telegram для каждого типа сервера (user / admin).",
+    "servers: ключ - Hostname из события (FQDN, регистр не важен; короткое имя тоже сработает).",
+    "  type      - user | admin; определяет тему из topics.",
+    "  thread_id - необязательно: своя тема для конкретного сервера (перекрывает topics).",
+    "  nla_failure_heuristic - необязательно, по умолчанию true: считать 4625/3 с IpPort=0",
+    "              и внешним IP неудачным RDP-входом. false - при ложных срабатываниях",
+    "              (например, IIS с NTLM: WSUS, RD Web); 4625/10 обрабатывается всегда.",
+    "null в thread_id - отправка в TELEGRAM_THREAD_ID из окружения.",
+    "Ключи, начинающиеся с '_', игнорируются (примеры и комментарии)."
+  ],
+
+  "topics": {
+    "user": null,
+    "admin": null
+  },
+
+  "servers": {
+    "TS1.example.local": {
+      "type": "user"
+    },
+    "DC1.example.local": {
+      "type": "admin"
+    },
+    "WSUS.example.local": {
+      "type": "admin",
+      "nla_failure_heuristic": false
+    },
+    "_VIP.example.local": {
+      "type": "admin",
+      "thread_id": 12345
+    }
+  }
+}

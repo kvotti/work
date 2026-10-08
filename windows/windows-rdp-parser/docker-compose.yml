@@ -1,0 +1,28 @@
+services:
+
+  rsyslog:
+    image: rsyslog/rsyslog
+    container_name: winlog_syslog
+    entrypoint: ["rsyslogd","-n"]
+    ports:
+      - "1515:1515/tcp"
+    volumes:
+      - ./logs:/logs
+      - ./rsyslog.conf:/etc/rsyslog.conf
+
+  parser:
+    build: ./parser
+    container_name: winlog_parser
+    restart: always
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      TELEGRAM_THREAD_ID: ${TELEGRAM_THREAD_ID}
+      TELEGRAM_PROXY: ${TELEGRAM_PROXY}
+      RDP_SERVERS_PATH: /config/rdp_servers.json
+      UNKNOWN_HOST_MODE: ${UNKNOWN_HOST_MODE:-default}
+      TELEGRAM_FAILED_MENTION: ${TELEGRAM_FAILED_MENTION}
+      SESSIONS_PATH: /state/sessions.json
+    volumes:
+      - ./config:/config:ro
+      - ./state:/state

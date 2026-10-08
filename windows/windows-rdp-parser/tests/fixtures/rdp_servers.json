@@ -1,0 +1,28 @@
+{
+  "_comment": "Тестовая конфигурация для обезличенной фикстуры events.jsonl",
+
+  "topics": {
+    "user": 111,
+    "admin": 222
+  },
+
+  "servers": {
+    "TS1.example.local": {
+      "type": "user"
+    },
+    "DC1.example.local": {
+      "type": "admin"
+    },
+    "APP1.example.local": {
+      "type": "admin"
+    },
+    "WEB1.example.local": {
+      "type": "admin",
+      "nla_failure_heuristic": false
+    },
+    "VIP1.example.local": {
+      "type": "admin",
+      "thread_id": 333
+    }
+  }
+}
