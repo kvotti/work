@@ -104,7 +104,35 @@ docker logs -f winlog_parser
 
 ### Источник событий (NXLog)
 
-На Windows-серверах NXLog (`im_msvistalog`, `to_json()`) отправляет канал Security по TCP на порт 1515. Нужны события **4624, 4625, 4634, 4647, 4778, 4779**, и должен быть включён аудит входа: успех и отказ. Поля, которые использует парсер, перечислены в [docs/reuse.md](docs/reuse.md#формат-входных-событий).
+На каждом Windows-сервере NXLog CE читает канал Security и отправляет события в JSON по TCP на порт 1515 хоста с docker compose. Рабочий конфиг: [nxlog/nxlog.conf](nxlog/nxlog.conf).
+
+**Установка на сервер:**
+
+1. Установить [NXLog Community Edition](https://nxlog.co/downloads/nxlog-ce) (MSI) в каталог по умолчанию `C:\Program Files\nxlog`.
+2. Скопировать `nxlog/nxlog.conf` в `C:\Program Files\nxlog\conf\nxlog.conf`. В строке `define SYSLOG_SERVER` указать адрес хоста с docker compose.
+3. Включить аудит. Лучше через GPO: *Конфигурация компьютера → Политики → Конфигурация Windows → Параметры безопасности → Конфигурация расширенной политики аудита → Вход/выход*. На отдельном сервере можно командой (GUID работают и в русской, и в английской Windows):
+
+   ```powershell
+   # Вход (4624, 4625), Выход (4634, 4647), Другие события входа/выхода (4778, 4779)
+   auditpol /set /subcategory:"{0CCE9215-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+   auditpol /set /subcategory:"{0CCE9216-69AE-11D9-BED3-505054503030}" /success:enable
+   auditpol /set /subcategory:"{0CCE921C-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+   auditpol /get /category:"{69979849-797A-11D9-BED3-505054503030}"   # проверка
+   ```
+
+4. Перезапустить службу и проверить её лог:
+
+   ```powershell
+   Restart-Service nxlog
+   Get-Content "C:\Program Files\nxlog\data\nxlog.log" -Tail 20
+   ```
+
+   В логе не должно быть ошибок подключения к `SYSLOG_SERVER`. Если они есть, проверьте, что исходящий TCP 1515 разрешён в брандмауэре.
+
+5. На хосте с docker compose должен появиться файл `logs/raw/<ip сервера>/<дата>.log`. Каждая строка в нём — syslog-заголовок и JSON события.
+6. Добавить сервер в `config/rdp_servers.json` (см. [Добавление нового сервера](#добавление-нового-сервера)).
+
+Конфиг пересылает и события, которые парсер пока не использует (4648, 4672, 4740). Самое массовое из них — 4672; если трафик важен, его можно убрать из `QueryXML`. Поля, которые использует парсер, перечислены в [docs/reuse.md](docs/reuse.md#формат-входных-событий).
 
 rsyslog ([rsyslog.conf](rsyslog.conf)) пишет сырые логи в `logs/raw/<ip>/<дата>.log` и пересылает каждую строку парсеру.
 
