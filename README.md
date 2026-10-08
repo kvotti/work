@@ -44,8 +44,12 @@ parser:
 
 ## Развёртывание
 
+Проект лежит в подкаталоге `windows/windows-rdp-parser` репозитория [kvotti/work](https://github.com/kvotti/work). Чтобы скачать только его:
+
 ```bash
-git clone <repo> login_mon && cd login_mon
+git clone --filter=blob:none --sparse https://github.com/kvotti/work.git
+cd work && git sparse-checkout set windows/windows-rdp-parser
+cd windows/windows-rdp-parser
 cp .env.example .env                                         # заполнить
 cp config/rdp_servers.example.json config/rdp_servers.json   # заполнить
 docker compose up -d --build
@@ -60,7 +64,9 @@ docker logs -f winlog_parser
 [*] Listening on 0.0.0.0:1516
 ```
 
-Обновление: `git pull && docker compose up -d --build parser`.
+Обновление: `git pull && docker compose up -d --build parser`, из каталога проекта.
+
+`.env`, `config/rdp_servers.json`, `logs/` и `state/` находятся в `.gitignore` и при `git pull` не затрагиваются. При переезде со старой установки скопируйте их в каталог проекта до первого запуска.
 После правки только `config/rdp_servers.json` достаточно `docker compose restart parser`.
 
 ### Переменные окружения (`.env`)
