@@ -77,7 +77,7 @@ docker logs -f winlog_parser
 | `TELEGRAM_BOT_TOKEN` | да | токен бота |
 | `TELEGRAM_CHAT_ID` | да | ID группы с темами |
 | `TELEGRAM_THREAD_ID` | нет | тема по умолчанию: для хостов вне `rdp_servers.json` и серверов без темы |
-| `TELEGRAM_PROXY` | нет | HTTP(S)-прокси для api.telegram.org, `http://user:pass@host:port` |
+| `TELEGRAM_PROXY` | нет | Прокси для api.telegram.org: `http://user:pass@host:port` или `https://user:pass@host:port` (TLS до прокси) |
 | `UNKNOWN_HOST_MODE` | нет | `default` (по умолчанию) — хосты вне конфига в тему по умолчанию; `drop` — не отправлять |
 | `TELEGRAM_MIN_INTERVAL` | нет | минимальная пауза между сообщениями, с; по умолчанию `3` (лимит Telegram — около 20 сообщений в минуту на группу) |
 | `TELEGRAM_QUEUE_SIZE` | нет | размер очереди отправки, по умолчанию `500`; при переполнении отбрасываются самые старые, затем приходит сообщение о числе пропущенных |

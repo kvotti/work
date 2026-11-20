@@ -1,12 +1,10 @@
-import json
 import os
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections import deque
 from dataclasses import dataclass
+
+import requests
 
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -22,14 +20,18 @@ MAX_RETRIES = 3          # сетевые ошибки и 5xx
 MAX_RATE_LIMITS = 10     # подряд полученные 429 на одно сообщение
 BACKOFF = 5.0            # сек, удваивается с каждой попыткой
 
+# Прокси: http://host:port или https://host:port (TLS до самого прокси).
+# urllib.request не умеет TLS до прокси (схему https:// игнорирует и шлёт
+# CONNECT открытым текстом), поэтому используется requests/urllib3 2.x.
+# trust_env=False: переменные HTTP(S)_PROXY окружения не подмешиваются.
+telegram_session = requests.Session()
+telegram_session.trust_env = False
+
 if TELEGRAM_PROXY:
-    proxy_handler = urllib.request.ProxyHandler({
+    telegram_session.proxies = {
         "http": TELEGRAM_PROXY,
         "https": TELEGRAM_PROXY,
-    })
-    telegram_opener = urllib.request.build_opener(proxy_handler)
-else:
-    telegram_opener = urllib.request.build_opener()
+    }
 
 
 @dataclass
@@ -71,33 +73,39 @@ def send_telegram(text, thread_id=None) -> SendResult:
     if thread_id:
         data["message_thread_id"] = int(thread_id)
 
-    encoded = urllib.parse.urlencode(data).encode()
+    try:
+        response = telegram_session.post(url, data=data, timeout=10)
+    except requests.exceptions.ProxyError as e:
+        return SendResult(ok=False, retryable=True, error=f"proxy: {_strip_token(e)}")
+    except requests.exceptions.RequestException as e:
+        return SendResult(ok=False, retryable=True, error=f"connection: {_strip_token(e)}")
 
     try:
-        request = urllib.request.Request(url, data=encoded)
+        body = response.json()
+    except ValueError:
+        body = {}
 
-        with telegram_opener.open(request, timeout=10) as response:
-            result_json = json.loads(response.read().decode())
+    if response.status_code == 429:
+        retry_after = body.get("parameters", {}).get("retry_after", 30)
+        return SendResult(ok=False, retry_after=float(retry_after), error=f"429 {body}")
 
-        if not result_json.get("ok"):
-            return SendResult(ok=False, error=str(result_json))
+    if response.status_code != 200:
+        error = body or response.text[:200]
+        return SendResult(ok=False, retryable=response.status_code >= 500,
+                          error=f"{response.status_code} {error}")
 
-        return SendResult(ok=True)
+    if not body.get("ok"):
+        return SendResult(ok=False, error=str(body))
 
-    except urllib.error.HTTPError as e:
-        try:
-            body = json.loads(e.read().decode())
-        except (OSError, ValueError):
-            body = {}
+    return SendResult(ok=True)
 
-        if e.code == 429:
-            retry_after = body.get("parameters", {}).get("retry_after", 30)
-            return SendResult(ok=False, retry_after=float(retry_after), error=f"429 {body}")
 
-        return SendResult(ok=False, retryable=e.code >= 500, error=f"{e.code} {body}")
-
-    except (urllib.error.URLError, OSError) as e:
-        return SendResult(ok=False, retryable=True, error=f"connection: {e}")
+def _strip_token(e):
+    # В тексте исключений requests есть URL с токеном бота
+    text = str(e)
+    if TELEGRAM_BOT_TOKEN:
+        text = text.replace(TELEGRAM_BOT_TOKEN, "***")
+    return text
 
 
 # ------------------------------------------------------------
