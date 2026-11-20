@@ -1,3 +1,4 @@
+import time
 from collections import deque
 from datetime import timedelta
 
@@ -19,6 +20,21 @@ NLA_LOOKBACK = timedelta(seconds=30)
 NLA_LOOKAHEAD = timedelta(seconds=2)    # точность EventTime - 1 с
 CONTEXT_TTL = timedelta(seconds=60)
 CONTEXT_SWEEP_EVERY = 1000
+
+# Переподключение к отключённой сессии бывает в двух видах:
+#   4778 + 4624/7                       - LOGIN не возникает;
+#   4624/10 (временный вход) + 4778     - через ~1 с, временный вход
+#                                         закрывается 4634/10.
+# Поэтому RDP_LOGIN удерживается LOGIN_HOLD секунд: если за это время
+# пришёл 4778 того же пользователя на том же сервере - это RECONNECT.
+# Терминальный сервер, сутки: 25 из 51 4624/10 - временные, 4778 через
+# 0-4 с (максимум 4 с); остальные 26 - настоящие, 4778 за ними нет.
+LOGIN_HOLD = 10.0
+
+# Подбор пароля: первая RDP-неудача с адреса на сервер отправляется
+# сразу, повторные в течение FAIL_AGG_WINDOW секунд копятся и уходят
+# одной сводкой; при продолжающейся атаке - одна сводка в минуту.
+FAIL_AGG_WINDOW = 60.0
 
 
 # ------------------------------------------------------------
@@ -95,8 +111,68 @@ class CorrelationEngine:
         self.sessions = sessions or SessionStore()
         self.host_info = host_info or (lambda host: None)
         self.nla = NlaContext()
+        self.pending = []    # удерживаемые RDP_LOGIN (см. LOGIN_HOLD)
+        self.failures = {}   # (host, ip) -> окно агрегации RDP_FAILED
 
-    def process(self, ev: NormalizedEvent) -> list[RDPEvent]:
+    def process(self, ev: NormalizedEvent, now=None) -> list[RDPEvent]:
+        """
+        now - текущее время в секундах (по умолчанию time.monotonic()).
+        Сначала отдаёт удерживаемые LOGIN с истёкшим сроком, затем
+        результат обработки события.
+        """
+
+        if now is None:
+            now = time.monotonic()
+
+        results = self.tick(now)
+        results.extend(self.handle(ev, now))
+
+        return results
+
+    def tick(self, now=None) -> list[RDPEvent]:
+        """
+        Отдаёт удерживаемые RDP_LOGIN, срок которых истёк.
+        Вызывать периодически, даже если новых событий нет.
+        """
+
+        if now is None:
+            now = time.monotonic()
+
+        due = [p for p in self.pending if p["deadline"] <= now]
+        self.pending = [p for p in self.pending if p["deadline"] > now]
+        results = [p["event"] for p in due]
+
+        for key, window in list(self.failures.items()):
+            if window["deadline"] > now:
+                continue
+
+            if window["events"]:
+                results.append(failure_summary(window["events"]))
+
+                # Атака продолжается: следующее окно начинается сразу
+                self.failures[key] = new_failure_window(now)
+            else:
+                del self.failures[key]
+
+        return results
+
+    def flush(self) -> list[RDPEvent]:
+        """
+        Отдаёт все удерживаемые события (конец replay, остановка).
+        """
+
+        results = [p["event"] for p in self.pending]
+        self.pending = []
+
+        for window in self.failures.values():
+            if window["events"]:
+                results.append(failure_summary(window["events"]))
+
+        self.failures = {}
+
+        return results
+
+    def handle(self, ev: NormalizedEvent, now) -> list[RDPEvent]:
 
         if ev.event_id == 4624:
 
@@ -107,12 +183,12 @@ class CorrelationEngine:
                 return []
 
             if ev.logon_type == "10":
-                return self.on_rdp_logon(ev)
+                return self.on_rdp_logon(ev, now)
 
             return []
 
         if ev.event_id == 4625:
-            return self.on_logon_failure(ev)
+            return self.on_logon_failure(ev, now)
 
         if ev.event_id in (4778, 4779):
             return self.on_session_change(ev)
@@ -129,7 +205,7 @@ class CorrelationEngine:
     # 4624/10: новый RDP login
     # --------------------------------------------------------
 
-    def on_rdp_logon(self, ev):
+    def on_rdp_logon(self, ev, now):
 
         # Второе событие linked-пары (UAC split token):
         # его LogonId уже зарегистрирован первым событием.
@@ -165,17 +241,47 @@ class CorrelationEngine:
         if nla:
             evidence.insert(0, "4624/3")
 
-        return [RDPEvent(
-            event_type=RDP_LOGIN,
-            target_host=ev.host,
-            username=ev.user,
-            event_time=ev.event_time_raw,
-            source_ip=ev.ip,
-            logon_id=session_id,
-            client_workstation=client,
-            auth_package=nla.auth_package if nla else ev.auth_package,
-            evidence=evidence,
-        )]
+        self.pending.append({
+            "key": (ev.host_key, ev.user_key),
+            "session_id": session_id,
+            "deadline": now + LOGIN_HOLD,
+            "event": RDPEvent(
+                event_type=RDP_LOGIN,
+                target_host=ev.host,
+                username=ev.user,
+                event_time=ev.event_time_raw,
+                source_ip=ev.ip,
+                logon_id=session_id,
+                client_workstation=client,
+                auth_package=nla.auth_package if nla else ev.auth_package,
+                evidence=evidence,
+            ),
+        })
+
+        return []
+
+    def take_pending_login(self, ev):
+        """
+        Забирает удерживаемый LOGIN того же пользователя на том же
+        сервере: это был временный вход перед переподключением.
+        Его сессия не настоящая и удаляется из списка.
+        """
+
+        key = (ev.host_key, ev.user_key)
+        taken = [p for p in self.pending if p["key"] == key]
+
+        if not taken:
+            return None
+
+        self.pending = [p for p in self.pending if p["key"] != key]
+
+        for p in taken:
+            session = self.sessions.find(ev.host_key, p["session_id"])
+
+            if session and p["session_id"] != ev.logon_id:
+                self.sessions.remove(session)
+
+        return taken[-1]["event"]
 
     # --------------------------------------------------------
     # 4778 / 4779: reconnect / disconnect
@@ -188,6 +294,7 @@ class CorrelationEngine:
 
         reconnect = ev.event_id == 4778
         session_id = ev.logon_id
+        login = self.take_pending_login(ev) if reconnect else None
 
         if ev.logon_id:
             session = self.sessions.find(ev.host_key, ev.logon_id)
@@ -215,8 +322,9 @@ class CorrelationEngine:
             source_ip=ev.ip,
             logon_id=ev.logon_id,
             client_name=ev.client_name,
+            client_workstation=login.client_workstation if login else None,
             session_name=ev.session_name,
-            evidence=[str(ev.event_id)],
+            evidence=(["4624/10"] if login else []) + [str(ev.event_id)],
         )]
 
     # --------------------------------------------------------
@@ -282,7 +390,7 @@ class CorrelationEngine:
     #           сетевые неудачи (SMB, службы, 1С и т.п.).
     # --------------------------------------------------------
 
-    def on_logon_failure(self, ev):
+    def on_logon_failure(self, ev, now):
 
         if ev.logon_type == "10":
             evidence = ["4625/10"]
@@ -304,7 +412,7 @@ class CorrelationEngine:
         if is_noise_logon_failure(ev):
             return []
 
-        return [RDPEvent(
+        failure = RDPEvent(
             event_type=RDP_FAILED,
             target_host=ev.host,
             username=ev.user,
@@ -315,7 +423,51 @@ class CorrelationEngine:
             status=ev.status,
             substatus=ev.substatus,
             evidence=evidence,
-        )]
+        )
+
+        key = (ev.host_key, ev.ip or ev.user_key)
+        window = self.failures.get(key)
+
+        if window and window["deadline"] > now:
+            window["events"].append(failure)
+            return []
+
+        self.failures[key] = new_failure_window(now)
+
+        return [failure]
+
+
+def new_failure_window(now):
+    return {"deadline": now + FAIL_AGG_WINDOW, "events": []}
+
+
+def failure_summary(events):
+    """
+    Одна RDP_FAILED на несколько неудач с одного адреса на один сервер.
+    Одиночная неудача отдаётся как есть.
+    """
+
+    if len(events) == 1:
+        return events[0]
+
+    last = events[-1]
+    usernames = list(dict.fromkeys(e.username for e in events))
+
+    return RDPEvent(
+        event_type=RDP_FAILED,
+        target_host=last.target_host,
+        username=usernames[0] if len(usernames) == 1 else f"учётных записей: {len(usernames)}",
+        event_time=last.event_time,
+        source_ip=last.source_ip,
+        client_workstation=last.client_workstation,
+        auth_package=last.auth_package,
+        status=last.status,
+        substatus=last.substatus,
+        evidence=last.evidence + ["aggregated"],
+        failure_count=len(events),
+        usernames=usernames,
+        first_event_time=events[0].event_time,
+    )
 
 
 # ------------------------------------------------------------

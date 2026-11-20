@@ -12,6 +12,7 @@
 | `state.py` | всегда | нет; путь к файлу передаётся параметром, `None` — только в памяти |
 | `formatter.py` | если нужен тот же текст | эмодзи, упоминание из `TELEGRAM_FAILED_MENTION` |
 | `router.py` | если нужна маршрутизация по серверам | формат `rdp_servers.json`, понятие `thread_id` |
+| `telegram_client.py` | если отправка в Telegram | Bot API, переменные `TELEGRAM_*` |
 | `parser.py` | нет, это сборка конкретного сервиса | TCP 1516, rsyslog, Telegram, переменные окружения |
 
 Модули импортируют друг друга без пакета (`from models import ...`), поэтому каталог `parser/` нужно скопировать целиком (или только нужные модули) и добавить его в `sys.path`. Чтобы встроить его как пакет, замените импорты на относительные (`from .models import ...`) в `engine.py`, `formatter.py`, `normalize.py`, `router.py`, `replay.py`, `parser.py`.
@@ -41,7 +42,13 @@ for raw in read_events():                 # dict в формате NXLog JSON
         continue
     for rdp in engine.process(ev):         # list[RDPEvent], обычно 0 или 1
         handle(rdp)                        # ваша отправка или запись
+
+# Периодически (например, раз в секунду), даже если событий нет:
+for rdp in engine.tick():
+    handle(rdp)
 ```
+
+`tick()` отдаёт удерживаемые RDP_LOGIN, у которых истекло окно (см. [detection.md](detection.md#rdp_login)). Без регулярного вызова LOGIN будет отправлен только при следующем событии. В [parser.py](../parser/parser.py) это сделано таймаутом сокета в 1 с.
 
 С готовым конфигом этого проекта:
 
@@ -62,7 +69,11 @@ engine = CorrelationEngine(sessions=SessionStore(None), host_info=router.host_in
   - `nla_failure_heuristic`: `bool`. Включает правило 4625/3.
 
   Если `host_info` не передан, ни один сервер не считается известным: 4625/3 никогда не даёт RDP_FAILED, а неподтверждённый 4647 не отправляется.
-- `process(ev: NormalizedEvent) -> list[RDPEvent]`: синхронный вызов без ожиданий и таймеров.
+- `process(ev, now=None) -> list[RDPEvent]`: обрабатывает событие и заодно отдаёт удерживаемые LOGIN с истёкшим окном. `now` — текущее время в секундах, по умолчанию `time.monotonic()`.
+- `tick(now=None) -> list[RDPEvent]`: удерживаемые LOGIN и сводки неудачных входов с истёкшим окном.
+- `flush() -> list[RDPEvent]`: все удерживаемые события сразу. Вызывайте при остановке и в конце пакетной обработки.
+
+**Часы.** В живом режиме не передавайте `now`: используется `time.monotonic()`, и часовые пояса хостов не влияют. При пакетной обработке логов передавайте `now = event_time.timestamp()` и вызывайте `flush()` в конце каждого файла (один файл — один хост), как в [replay.py](../parser/replay.py). Иначе окно удержания будет считаться по реальному времени обработки, а не по времени событий.
 
 Порядок событий важен в пределах одного хоста: 4624/3 должен прийти до 4624/10, а 4624/10 до 4647. NXLog и rsyslog по TCP этот порядок сохраняют. При пакетной обработке сортируйте события по `EventTime` и `RecordNumber`.
 
@@ -85,6 +96,7 @@ Engine **не потокобезопасен**. Вызывайте его из �
 | `status`, `substatus` | коды отказа | FAILED |
 | `confidence` | `confirmed` или `probable` | всех; `probable` только у LOGOFF неизвестной сессии |
 | `evidence` | список признаков, например `["4624/3", "4624/10", "linked"]` | всех |
+| `failure_count`, `usernames`, `first_event_time` | сводка повторных неудач: число, учётные записи, время первой | FAILED со `failure_count > 1` |
 
 Для JSON-сериализации используйте `dataclasses.asdict(rdp)`.
 
@@ -127,6 +139,8 @@ def from_winlogbeat(doc):
 Учтите, что Winlogbeat отдаёт `ElevatedToken` как текст (`Yes`/`No`), а не как `%%1842`/`%%1843`. `parse_yes_no` понимает оба варианта.
 
 ## Своя отправка вместо Telegram
+
+Для Telegram есть готовая очередь `TelegramSender` ([telegram_client.py](../parser/telegram_client.py)): `submit(text, thread_id)` кладёт сообщение в очередь и сразу возвращается, отдельный поток отправляет не чаще раза в `TELEGRAM_MIN_INTERVAL` секунд, при `429` ждёт `retry_after`, при сетевых ошибках повторяет до 3 раз. Функцию отправки, `sleep` и часы можно передать в конструктор, это используется в тестах.
 
 `formatter.format_rdp_event(rdp) -> str` и `router.Router.route(rdp) -> Route | None` от Telegram не зависят: `Route.thread_id` — просто число из конфига. Для другого мессенджера или SIEM:
 

@@ -113,6 +113,50 @@ class SessionTest(unittest.TestCase):
         self.assertEqual([e.event_type for e in out], [RDP_LOGIN, RDP_DISCONNECT, RDP_RECONNECT])
         self.assertEqual(out[1].client_name, "PC-01")
 
+    def test_reconnect_via_temporary_logon(self):
+        # Переподключение к отключённой сессии 0x80c через временный
+        # вход 0x813 (4624/10), который закрывается через секунду.
+        out = run(self.engine,
+                  nla_logon(time="2026-10-08 19:10:35"),
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  session_event(4778, "0x80c", time="2026-10-08 19:10:38"),
+                  event(4634, LogonType="10", TargetLogonId="0x813", time="2026-10-08 19:10:38", **USER))
+
+        self.assertEqual([(e.event_type, e.logon_id) for e in out], [(RDP_RECONNECT, "0x80c")])
+        self.assertEqual(out[0].client_name, "PC-01")
+        self.assertIsNone(self.engine.sessions.find("ts1.example.local", "0x813"))
+
+    def test_reconnect_4_seconds_after_temporary_logon(self):
+        out = run(self.engine,
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  session_event(4778, "0x80c", time="2026-10-08 19:10:41"))
+
+        self.assertEqual([e.event_type for e in out], [RDP_RECONNECT])
+
+    def test_login_followed_by_late_reconnect_is_kept(self):
+        out = run(self.engine,
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  session_event(4778, "0x80c", time="2026-10-08 19:10:50"))
+
+        self.assertEqual([e.event_type for e in out], [RDP_LOGIN, RDP_RECONNECT])
+
+    def test_reconnect_of_other_user_keeps_login(self):
+        out = run(self.engine,
+                  rdp_logon("0x813", time="2026-10-08 19:10:37"),
+                  {**session_event(4778, "0x80c", time="2026-10-08 19:10:38"), "AccountName": "user02"})
+
+        self.assertEqual([e.event_type for e in out], [RDP_RECONNECT, RDP_LOGIN])
+
+    def test_login_is_held_until_tick(self):
+        # Живой режим: LOGIN уходит только после LOGIN_HOLD секунд
+        from helpers import normalize_event
+        from engine import LOGIN_HOLD
+
+        self.assertEqual(self.engine.process(normalize_event(rdp_logon("0x813")), now=100.0), [])
+        self.assertEqual(self.engine.tick(100.0 + LOGIN_HOLD - 1), [])
+        self.assertEqual([e.event_type for e in self.engine.tick(100.0 + LOGIN_HOLD)], [RDP_LOGIN])
+        self.assertEqual(self.engine.tick(1000.0), [])
+
     def test_console_session_events_are_ignored(self):
         out = run(self.engine,
                   session_event(4778, "0x600", session="Console", address="LOCAL"),
@@ -225,6 +269,65 @@ class FailureTest(unittest.TestCase):
     def test_other_logon_types_ignored(self):
         self.assertSilent(failure(logon_type="2"))
 
+
+
+class FailureAggregationTest(unittest.TestCase):
+
+    def setUp(self):
+        self.engine = helpers.make_engine()
+
+    def attempt(self, time, user="user01", ip="192.0.2.10", host="TS1.example.local"):
+        return failure(time=time, ip=ip, host=host, TargetUserName=user)
+
+    def test_first_failure_is_immediate(self):
+        out = run(self.engine, self.attempt("2026-10-08 10:00:00"), flush=False)
+
+        self.assertEqual([e.failure_count for e in out], [1])
+
+    def test_brute_force_is_summarized(self):
+        attempts = [self.attempt(f"2026-10-08 10:00:{s:02d}", user=f"user{s:02d}") for s in range(0, 50, 5)]
+        out = run(self.engine, *attempts)
+
+        self.assertEqual([e.failure_count for e in out], [1, 9])
+        summary = out[1]
+        self.assertEqual(summary.first_event_time, "2026-10-08 10:00:05")
+        self.assertEqual(summary.event_time, "2026-10-08 10:00:45")
+        self.assertEqual(len(summary.usernames), 9)
+        self.assertIn("aggregated", summary.evidence)
+
+    def test_summary_sent_when_window_expires(self):
+        run(self.engine, self.attempt("2026-10-08 10:00:00"), self.attempt("2026-10-08 10:00:10"),
+            self.attempt("2026-10-08 10:00:20"), flush=False)
+        out = self.engine.tick(helpers.normalize_event(self.attempt("2026-10-08 10:01:00")).event_time.timestamp())
+
+        self.assertEqual([(e.failure_count, e.usernames) for e in out], [(2, ["EXAMPLE\\user01"])])
+
+    def test_continuous_attack_gives_summary_per_minute(self):
+        attempts = [self.attempt(f"2026-10-08 10:{m:02d}:{s:02d}") for m in range(3) for s in range(0, 60, 10)]
+        out = run(self.engine, *attempts)
+
+        self.assertEqual(sum(e.failure_count for e in out), len(attempts))
+        self.assertLessEqual(len(out), 4)
+
+    def test_single_retry_is_not_a_summary(self):
+        out = run(self.engine, self.attempt("2026-10-08 10:00:00"), self.attempt("2026-10-08 10:00:09"))
+
+        self.assertEqual([e.failure_count for e in out], [1, 1])
+
+    def test_different_sources_are_separate(self):
+        out = run(self.engine,
+                  self.attempt("2026-10-08 10:00:00", ip="192.0.2.10"),
+                  self.attempt("2026-10-08 10:00:01", ip="192.0.2.11"),
+                  self.attempt("2026-10-08 10:00:02", ip="192.0.2.10", host="DC1.example.local"),
+                  flush=False)
+
+        self.assertEqual(len(out), 3)
+
+    def test_new_window_after_quiet_period(self):
+        out = run(self.engine, self.attempt("2026-10-08 10:00:00"), self.attempt("2026-10-08 10:05:00"))
+
+        self.assertEqual([e.failure_count for e in out], [1, 1])
+        self.assertEqual(out[1].event_time, "2026-10-08 10:05:00")
 
 if __name__ == "__main__":
     unittest.main()

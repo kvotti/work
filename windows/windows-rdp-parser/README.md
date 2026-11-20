@@ -5,7 +5,7 @@
 | Событие | Источник | Сообщение |
 |---|---|---|
 | `RDP_LOGIN` | 4624, LogonType 10 | 🟢 RDP LOGIN |
-| `RDP_FAILED` | 4625/10; 4625/3 с `IpPort=0` (NLA) | 🔴 RDP LOGIN FAILED |
+| `RDP_FAILED` | 4625/10; 4625/3 с `IpPort=0` (NLA); повторы с одного адреса — сводкой раз в минуту | 🔴 RDP LOGIN FAILED |
 | `RDP_RECONNECT` | 4778, `SessionName=RDP-Tcp*` | 🟡 RDP RECONNECT |
 | `RDP_DISCONNECT` | 4779, `SessionName=RDP-Tcp*` | 🟠 RDP DISCONNECT |
 | `RDP_LOGOFF` | 4647 + известная RDP-сессия | 🔵 RDP LOGOFF |
@@ -23,7 +23,7 @@ Windows (NXLog, JSON) ──TCP 1515──> rsyslog ──TCP 1516──> parser
 parser:
   parse_line ─> normalize_event ─> CorrelationEngine ─> RDPEvent
                                         │                  │
-                                  SessionStore        format_rdp_event ─> Router ─> send_telegram
+                                  SessionStore        format_rdp_event ─> Router ─> TelegramSender
                               (state/sessions.json)                    (config/rdp_servers.json)
 ```
 
@@ -37,7 +37,8 @@ parser:
 | [parser/state.py](parser/state.py) | `SessionStore`: известные RDP-сессии, сохранение в JSON | — |
 | [parser/formatter.py](parser/formatter.py) | `RDPEvent` → текст сообщения | models |
 | [parser/router.py](parser/router.py) | хост → тема Telegram; факты о хосте для Engine | models |
-| [parser/parser.py](parser/parser.py) | TCP-сервер, `parse_line`, `send_telegram`, сборка слоёв | все |
+| [parser/telegram_client.py](parser/telegram_client.py) | `TelegramSender`: очередь отправки, паузы, повторы при 429 и сбоях сети | — |
+| [parser/parser.py](parser/parser.py) | TCP-сервер, `parse_line`, сборка слоёв | все |
 | [parser/replay.py](parser/replay.py) | офлайн-прогон логов без Telegram | все, кроме отправки |
 
 Только стандартная библиотека Python 3.11, без внешних зависимостей.
@@ -64,7 +65,7 @@ docker logs -f winlog_parser
 [*] Listening on 0.0.0.0:1516
 ```
 
-Обновление: `git pull && docker compose up -d --build parser`, из каталога проекта.
+Обновление: `git pull && docker compose up -d --build parser`, из каталога проекта. Пересобирать нужно именно образ: код копируется в него при сборке, и `docker compose restart` оставит старую версию. rsyslog при этом продолжает принимать события, а пересылку парсеру держит в очереди и досылает после перезапуска.
 
 `.env`, `config/rdp_servers.json`, `logs/` и `state/` находятся в `.gitignore` и при `git pull` не затрагиваются. При переезде со старой установки скопируйте их в каталог проекта до первого запуска.
 После правки только `config/rdp_servers.json` достаточно `docker compose restart parser`.
@@ -76,8 +77,10 @@ docker logs -f winlog_parser
 | `TELEGRAM_BOT_TOKEN` | да | токен бота |
 | `TELEGRAM_CHAT_ID` | да | ID группы с темами |
 | `TELEGRAM_THREAD_ID` | нет | тема по умолчанию: для хостов вне `rdp_servers.json` и серверов без темы |
-| `TELEGRAM_PROXY` | нет | HTTP(S)-прокси для api.telegram.org, `http://user:pass@host:port` |
+| `TELEGRAM_PROXY` | нет | Прокси для api.telegram.org: `http://user:pass@host:port` или `https://user:pass@host:port` (TLS до прокси) |
 | `UNKNOWN_HOST_MODE` | нет | `default` (по умолчанию) — хосты вне конфига в тему по умолчанию; `drop` — не отправлять |
+| `TELEGRAM_MIN_INTERVAL` | нет | минимальная пауза между сообщениями, с; по умолчанию `3` (лимит Telegram — около 20 сообщений в минуту на группу) |
+| `TELEGRAM_QUEUE_SIZE` | нет | размер очереди отправки, по умолчанию `500`; при переполнении отбрасываются самые старые, затем приходит сообщение о числе пропущенных |
 | `TELEGRAM_FAILED_MENTION` | нет | упоминание в сообщениях о неудачном входе, например `@username`; по умолчанию без упоминания |
 
 `RDP_SERVERS_PATH` и `SESSIONS_PATH` заданы в `docker-compose.yml`.
@@ -149,6 +152,7 @@ rsyslog ([rsyslog.conf](rsyslog.conf)) пишет сырые логи в `logs/r
 | `.env` | секреты | нет |
 | `logs/` | сырые события (имена пользователей, IP) | нет |
 | `state/sessions.json` | известные RDP-сессии; переживает рестарт контейнера | нет |
+| `spool/` | очередь rsyslog для парсера, пока тот недоступен (до 1 ГБ) | нет |
 | `config/rdp_servers.json` | серверы и темы (имена инфраструктуры) | нет; в git только `rdp_servers.example.json` |
 
 Удаление `state/sessions.json` безопасно. Последствие: выход из сессий, открытых до этого, на `admin`-серверах не придёт, а на `user`-серверах придёт с пометкой «не подтверждено».
@@ -189,7 +193,6 @@ docker run --rm -v "$PWD/logs:/logs" -v "$PWD/tools:/tools" python:3.11-slim \
 
 ## Не реализовано
 
-- Сводка при подборе пароля: сейчас каждая неудача приходит отдельным сообщением.
-- Отправка в Telegram в отдельном потоке: медленный прокси задерживает разбор событий до 10 с на сообщение.
+- Сохранение очереди отправки на диск: сообщения, не отправленные к моменту остановки контейнера, теряются (события остаются в `logs/raw`).
 - Перечитывание `rdp_servers.json` без перезапуска.
 - Каналы RdpCoreTS и TerminalServices-LocalSessionManager. Нужны, если эвристика `IpPort=0` перестанет работать, и чтобы получать имя клиента при Kerberos-входе.

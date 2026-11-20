@@ -71,3 +71,8 @@ class RDPEvent:
 
     confidence: str = "confirmed"   # confirmed | probable
     evidence: list[str] = field(default_factory=list)
+
+    # RDP_FAILED-сводка повторных попыток (см. FAIL_AGG_WINDOW в engine.py)
+    failure_count: int = 1
+    usernames: list[str] = field(default_factory=list)
+    first_event_time: str | None = None
