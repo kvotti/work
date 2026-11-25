@@ -9,7 +9,7 @@ from unittest import mock
 import helpers
 from helpers import event
 import formatter
-from formatter import format_rdp_event
+from formatter import format_rdp_event, format_startup
 from models import RDP_FAILED, RDP_LOGIN, RDP_LOGOFF, RDPEvent
 from normalize import normalize_event
 from state import SessionStore
@@ -179,6 +179,13 @@ class FormatterTest(unittest.TestCase):
 
         with mock.patch.object(formatter, "FAILED_MENTION", ""):
             self.assertTrue(format_rdp_event(event).endswith("🕐 Time: 2026-10-08 10:00:00"))
+
+    def test_startup_message(self):
+        text = format_startup(servers=25, sessions=20)
+
+        self.assertTrue(text.startswith("✅ RDP-парсер запущен"))
+        self.assertIn("Серверов в конфиге: 25", text)
+        self.assertIn("Восстановлено сессий: 20", text)
 
 
 if __name__ == "__main__":

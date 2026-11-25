@@ -5,7 +5,7 @@ import socket
 import time
 
 from engine import CorrelationEngine
-from formatter import format_rdp_event
+from formatter import format_rdp_event, format_startup
 from normalize import normalize_event
 from router import router_from_env
 from state import SessionStore
@@ -146,8 +146,9 @@ def main():
     router = router_from_env()
     sender = TelegramSender(notice_thread_id=router.default_thread_id)
     sender.start()
+    sessions = SessionStore(os.getenv("SESSIONS_PATH", "/state/sessions.json"))
     engine = CorrelationEngine(
-        sessions=SessionStore(os.getenv("SESSIONS_PATH", "/state/sessions.json")),
+        sessions=sessions,
         host_info=router.host_info,
     )
 
@@ -172,6 +173,16 @@ def main():
     print(
         f"[*] Listening on "
         f"{LISTEN_HOST}:{LISTEN_PORT}"
+    )
+
+    # Порт занят, парсер готов принимать события: сообщаем в тему
+    # по умолчанию (TELEGRAM_THREAD_ID), что он работает.
+    sender.submit(
+        format_startup(
+            servers=len(router.servers),
+            sessions=len(sessions.sessions),
+        ),
+        router.default_thread_id,
     )
 
     while True:
