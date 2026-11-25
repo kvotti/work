@@ -65,10 +65,47 @@ docker logs -f winlog_parser
 [*] Listening on 0.0.0.0:1516
 ```
 
+а в теме по умолчанию (`TELEGRAM_THREAD_ID`) — сообщение «✅ RDP-парсер запущен».
+
 Обновление: `git pull && docker compose up -d --build parser`, из каталога проекта. Пересобирать нужно именно образ: код копируется в него при сборке, и `docker compose restart` оставит старую версию. rsyslog при этом продолжает принимать события, а пересылку парсеру держит в очереди и досылает после перезапуска.
 
 `.env`, `config/rdp_servers.json`, `logs/` и `state/` находятся в `.gitignore` и при `git pull` не затрагиваются. При переезде со старой установки скопируйте их в каталог проекта до первого запуска.
 После правки только `config/rdp_servers.json` достаточно `docker compose restart parser`.
+
+### Сервер без прямого доступа в интернет
+
+Если интернет доступен только через прокси, его нужно указать в двух местах:
+
+- `TELEGRAM_PROXY` в `.env` — для отправки в Telegram из парсера;
+- настройки Docker — для скачивания образа `python:3.11-slim` при сборке.
+
+Без прокси для Docker сборка подолгу висит на шаге `load metadata for docker.io/library/python:3.11-slim`: Docker при каждой сборке проверяет обновление образа в Docker Hub и ждёт таймаута.
+
+Прокси для Docker задаётся в `/etc/docker/daemon.json` (если файла нет, создайте его):
+
+```json
+{
+  "proxies": {
+    "http-proxy": "https://user:pass@host:port",
+    "https-proxy": "https://user:pass@host:port",
+    "no-proxy": "localhost,127.0.0.1"
+  }
+}
+```
+
+- Ключи `http-proxy` и `https-proxy` обозначают тип запросов, а не тип прокси: значением может быть и `http://`, и `https://` прокси. Docker Hub работает по HTTPS, поэтому обязателен `https-proxy`.
+- Спецсимволы в логине и пароле записываются в URL-кодировке: `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`. Это касается и `TELEGRAM_PROXY`.
+- Если сертификат прокси выдан внутренним или самоподписанным центром сертификации, добавьте корневой сертификат в систему: положите его в `/usr/local/share/ca-certificates/proxy.crt` и выполните `sudo update-ca-certificates`. Иначе `docker pull` упадёт с ошибкой `x509: certificate signed by unknown authority`.
+
+Применить настройки и проверить:
+
+```bash
+sudo systemctl restart docker      # перезапускает все контейнеры на сервере
+docker info | grep -i proxy
+docker pull python:3.11-slim
+```
+
+`pip install` внутри сборки этой настройкой не покрывается. Пока `parser/dockerfile` не меняется, этот шаг берётся из кэша и интернет ему не нужен.
 
 ### Переменные окружения (`.env`)
 
